@@ -205,7 +205,7 @@ Binary directory:/workspace/miniob/build_debug/bin
 Archive directory:/workspace/miniob/build_debug/lib
 observer_static use readline
 Build client_performance_test according to /workspace/miniob/test/perf/client_performance_test.cpp
- -Wall -Werror -Wno-error=sign-compare  -O0 -g -DDEBUG  -fno-omit-frame-pointer -fsanitize=address -fsanitize-address-use-after-scope
+ -Wall -Werror -Wno-error=sign-compare -mavx2  -O0 -g -DDEBUG  -fno-omit-frame-pointer -fsanitize=address -fsanitize-address-use-after-scope
 Build bitmap_test according to /workspace/miniob/unittest/common/bitmap_test.cpp
 Build integer_generator_test according to /workspace/miniob/unittest/common/integer_generator_test.cpp
 Build log_test according to /workspace/miniob/unittest/common/log_test.cpp
@@ -239,3 +239,13 @@ Build pax_storage_test according to /workspace/miniob/unittest/observer/pax_stor
 Build persist_test according to /workspace/miniob/unittest/observer/persist_test.cpp
 Build record_manager_test according to /workspace/miniob/unittest/observer/record_manager_test.cpp
 Build ring_buffer_test according to /workspace/miniob/unittest/observer/ring_buffer_test.cpp
+/workspace/miniob/src/observer/sql/expr/aggregate_hash_table.cpp: In member function ‘virtual RC StandardAggregateHashTable::add_chunk(Chunk&, Chunk&)’:
+/workspace/miniob/src/observer/sql/expr/aggregate_hash_table.cpp:26:24: warning: comparison of integer expressions of different signedness: ‘size_t’ {aka ‘long unsigned int’} and ‘int’ [-Wsign-compare]
+   26 |   for (size_t i = 0; i < rows; i++){
+      |                      ~~^~~~~~
+/workspace/miniob/src/observer/sql/expr/aggregate_hash_table.cpp:30:26: warning: comparison of integer expressions of different signedness: ‘size_t’ {aka ‘long unsigned int’} and ‘int’ [-Wsign-compare]
+   30 |     for (size_t j = 0; j < groups_chunk.column_num(); j++) {
+      |                        ~~^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/workspace/miniob/src/observer/sql/expr/aggregate_hash_table.cpp:35:26: warning: comparison of integer expressions of different signedness: ‘size_t’ {aka ‘long unsigned int’} and ‘int’ [-Wsign-compare]
+   35 |     for (size_t j = 0; j < aggrs_chunk.column_num(); j++) {
+      |                        ~~^~~~~~~~~~~~~~~~~~~~~~~~~~

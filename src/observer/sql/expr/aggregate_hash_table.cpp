@@ -81,6 +81,9 @@ RC StandardAggregateHashTable::Scanner::next(Chunk &output_chunk)
     auto &aggrs           = it_->second;
     for (int i = 0; i < output_chunk.column_num(); i++) {
       auto col_idx = output_chunk.column_ids(i);
+      // 这通常用于多列的聚合查询结果，其中一些列是分组依据的列（group_by_values），
+      // 而其他列是聚合函数的结果（aggrs）。通过这种方式，可以构建一个包含分组键和聚合
+      // 结果的复合数据结构，然后将其输出或进一步处理。
       if (col_idx >= static_cast<int>(group_by_values.size())) {
         output_chunk.column(i).append_one((char *)aggrs[col_idx - group_by_values.size()].data());
       } else {
@@ -256,31 +259,153 @@ void LinearProbingAggregateHashTable<V>::resize_if_need()
 }
 
 template <typename V>
+void LinearProbingAggregateHashTable<V>::selective_load_slow_key(int* memory,int offset,int* val,int* inv)
+{
+    for (int i = 0; i < SIMD_WIDTH; i++) {
+    if (inv[i] == -1) {
+      val[i] = memory[offset++];
+    }
+  }
+}
+
+template <typename V>
+void LinearProbingAggregateHashTable<V>::selective_load_slow_value(V* memory,int offset,V* val,int* inv)
+{
+    for (int i = 0; i < SIMD_WIDTH; i++) {
+    if (inv[i] == -1) {
+      val[i] = memory[offset++];
+    }
+  }
+}
+
+template <typename V>
+vector<int> LinearProbingAggregateHashTable<V>::get_hash(vector<int> keys)
+{
+  vector<int> hash_value;
+  for(int i=0;i<8;i++)
+  {
+    hash_value.push_back((keys[i]% capacity_ + capacity_) % capacity_);
+  }
+  return hash_value;
+}
+template <typename V>
+void LinearProbingAggregateHashTable<V>::deal_lost(int key,V val)
+{
+  int index = (key % capacity_ + capacity_) % capacity_;
+  // Linear probe
+  while (keys_[index]!=EMPTY_KEY&&keys_[index]!=key)
+  {
+    index++;        /* code */
+  }
+  // Insert or update
+  if (keys_[index] == key) {
+    size_++;
+    values_[index] += val;
+  } else {
+    keys_[index] = key;
+    values_[index] = val;
+  }
+}
+
+template <typename V>
 void LinearProbingAggregateHashTable<V>::add_batch(int *input_keys, V *input_values, int len)
 {
-  // your code here
-  exit(-1);
-
   // inv (invalid) 表示是否有效，inv[i] = -1 表示有效，inv[i] = 0 表示无效。
   // key[SIMD_WIDTH],value[SIMD_WIDTH] 表示当前循环中处理的键值对。
   // off (offset) 表示线性探测冲突时的偏移量，key[i] 每次遇到冲突键，则off[i]++，如果key[i] 已经完成聚合，则off[i] = 0，
   // i = 0 表示selective load 的起始位置。
   // inv 全部初始化为 -1
   // off 全部初始化为 0
+  
+    // for (; i + SIMD_WIDTH <= len;) {
 
-  // for (; i + SIMD_WIDTH <= len;) {
-    // 1: 根据 `inv` 变量的值，从 `input_keys` 中 `selective load` `SIMD_WIDTH` 个不同的输入键值对。
-    // 2. 计算 i += |inv|, `|inv|` 表示 `inv` 中有效的个数 
-    // 3. 计算 hash 值，
-    // 4. 根据聚合类型（目前只支持 sum），在哈希表中更新聚合结果。如果本次循环，没有找到key[i] 在哈希表中的位置，则不更新聚合结果。
+
+
+
     // 5. gather 操作，根据 hash 值将 keys_ 的 gather 结果写入 table_key 中。
-    // 6. 更新 inv 和 off。如果本次循环key[i] 聚合完成，则inv[i]=-1，表示该位置在下次循环中读取新的键值对。
     // 如果本次循环 key[i] 未在哈希表中聚合完成（table_key[i] != key[i]），则inv[i] = 0，表示该位置在下次循环中不需要读取新的键值对。
     // 如果本次循环中，key[i]聚合完成，则off[i] 更新为 0，表示线性探测偏移量为 0，key[i] 未完成聚合，则off[i]++,表示线性探测偏移量加 1。
   // }
-  //7. 通过标量线性探测，处理剩余键值对
 
-  // resize_if_need();
+  int inv[8] = {-1,-1,-1,-1,-1,-1,-1,-1};
+  int off[8] = {0,0,0,0,0,0,0,0};
+  vector<int> key(SIMD_WIDTH,0);
+  vector<V> value(SIMD_WIDTH,0);
+
+  int i =0;
+  while(i+SIMD_WIDTH<=len)
+  {
+    // 1: 根据 `inv` 变量的值，从 `input_keys` 中 `selective load` `SIMD_WIDTH` 个不同的输入键值对。
+    selective_load_slow_key(input_keys,i,key.data(),inv);
+    selective_load_slow_value(input_values,i,value.data(),inv);
+
+    // 2. 计算 i += |inv|, `|inv|` 表示 `inv` 中有效的个数 
+    for (int j = 0; j < 8; j++)
+    {
+      i -= inv[j];
+    }
+    
+    // 3. 计算 hash 值，
+    vector<int> hash_value = get_hash(key);
+    // 4. 根据聚合类型（目前只支持 sum），在哈希表中更新聚合结果。如果本次循环，没有找到key[i] 在哈希表中的位置，则不更新聚合结果。
+    for(int j=0;j<8;j++)
+    {
+    // 6. 更新 inv 和 off。如果本次循环key[i] 聚合完成，则inv[i]=-1，表示该位置在下次循环中读取新的键值对。
+      int index = hash_value[j];
+      index += off[j];
+      if(keys_[index] == EMPTY_KEY)
+      {
+        size_++;
+        keys_[index] = key[j];
+        values_[index] = value[j];
+        off[j] = 0;
+        inv[j] = -1;//需要更新
+      }
+      else if (keys_[index] != key[j])
+      {
+        off[j]++;
+        inv[j] = 0;//不能更新
+      }
+      else
+      {
+        //进行聚合
+        off[j] = 0;
+        inv[j] = -1;
+        values_[index] += value[j];
+      }
+    }
+  }
+  //7. 通过标量线性探测，处理剩余键值对
+  //处理遗留在key和value中的键值对
+  for(int j=0;j<8;j++)
+  {
+    if(inv[j]==0)
+    {
+      deal_lost(key[j],value[j]);
+    }
+  }
+
+
+  for (; i < len; i++) {
+    int key_it = input_keys[i];
+    V value_it = input_values[i];
+    int index = (key_it % capacity_ + capacity_) % capacity_;
+
+    // Linear probe
+    while (keys_[index]!=EMPTY_KEY&&keys_[index]!=key_it)
+    {
+      index++;        /* code */
+    }
+    // Insert or update
+    if (keys_[index] == key_it) {
+      values_[index] += value_it;
+    } else {
+      size_++;
+      keys_[index] = key_it;
+      values_[index] = value_it;
+    }
+  }
+  resize_if_need();
 }
 
 template <typename V>
